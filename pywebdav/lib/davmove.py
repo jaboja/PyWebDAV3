@@ -1,12 +1,11 @@
 from __future__ import absolute_import
+
 from six.moves import urllib
 
-from . import utils
-from .constants import COLLECTION, OBJECT, DAV_PROPS
-from .constants import RT_ALLPROP, RT_PROPNAME, RT_PROP
 from .errors import *
-from .utils import create_treelist, quote_uri, gen_estring, make_xmlresponse, is_prefix
-from .davcmd import moveone, movetree
+from .utils import make_xmlresponse, \
+    is_prefix
+
 
 class MOVE:
     """ move resources and eventually create multistatus responses
@@ -19,13 +18,11 @@ class MOVE:
 
     """
 
-
-    def __init__(self,dataclass,src_uri,dst_uri,overwrite):
-        self.__dataclass=dataclass
-        self.__src=src_uri
-        self.__dst=dst_uri
-        self.__overwrite=overwrite
-
+    def __init__(self, dataclass, src_url, dst_url, overwrite):
+        self.__dataclass = dataclass
+        self.__src = src_url
+        self.__dst = dst_url
+        self.__overwrite = overwrite
 
     def single_action(self):
         """ move a normal resources.
@@ -35,19 +32,19 @@ class MOVE:
 
         """
 
-        dc=self.__dataclass
-        base=self.__src
+        dc = self.__dataclass
+        base = self.__src
 
         ### some basic tests
         # test if dest exists and overwrite is false
         if dc.exists(self.__dst) and not self.__overwrite: raise DAV_Error(412)
         # test if src and dst are the same
-        # (we assume that both uris are on the same server!)
-        ps=urllib.parse.urlparse(self.__src)[2]
-        pd=urllib.parse.urlparse(self.__dst)[2]
-        if ps==pd: raise DAV_Error(403)
+        # (we assume that both urls are on the same server!)
+        ps = urllib.parse.urlparse(self.__src)[2]
+        pd = urllib.parse.urlparse(self.__dst)[2]
+        if ps == pd: raise DAV_Error(403)
 
-        return dc.moveone(self.__src,self.__dst,self.__overwrite)
+        return dc.moveone(self.__src, self.__dst, self.__overwrite)
 
     def tree_action(self):
         """ move a tree of resources (a collection)
@@ -55,22 +52,21 @@ class MOVE:
         Here we return a multistatus xml element.
 
         """
-        dc=self.__dataclass
-        base=self.__src
+        dc = self.__dataclass
+        base = self.__src
 
-        ### some basic tests
+        # some basic tests
         # test if dest exists and overwrite is false
         if dc.exists(self.__dst) and not self.__overwrite: raise DAV_Error(412)
         # test if src and dst are the same
-        # (we assume that both uris are on the same server!)
-        ps=urllib.parse.urlparse(self.__src)[2]
-        pd=urllib.parse.urlparse(self.__dst)[2]
+        # (we assume that both urls are on the same server!)
+        ps = urllib.parse.urlparse(self.__src)[2]
+        pd = urllib.parse.urlparse(self.__dst)[2]
         if is_prefix(ps, pd):
             raise DAV_Error(403)
 
-        result=dc.movetree(self.__src,self.__dst,self.__overwrite)
+        result = dc.movetree(self.__src, self.__dst, self.__overwrite)
         if not result: return None
 
         # create the multistatus XML element
         return make_xmlresponse(result)
-

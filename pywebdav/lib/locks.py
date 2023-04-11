@@ -1,76 +1,77 @@
 from __future__ import absolute_import
-import time
-from six.moves import urllib
-import uuid
 
 import logging
+import time
+import uuid
+
+from six.moves import urllib
 
 log = logging.getLogger(__name__)
 
 import xml.dom
 from xml.dom import minidom
 
-from .utils import rfc1123_date, IfParser, tokenFinder
-from .errors import *
+from .utils import IfParser, tokenFinder
 
 tokens_to_lock = {}
-uris_to_token = {}
+urls_to_token = {}
+
 
 class LockManager:
     """ Implements the locking backend and serves as MixIn for DAVRequestHandler """
 
     def _init_locks(self):
-        return tokens_to_lock, uris_to_token
+        return tokens_to_lock, urls_to_token
 
-    def _l_isLocked(self, uri):
-        tokens, uris = self._init_locks()
-        return uri in uris
+    def _l_isLocked(self, url):
+        tokens, urls = self._init_locks()
+        return url in urls
 
     def _l_hasLock(self, token):
-        tokens, uris = self._init_locks()
+        tokens, urls = self._init_locks()
         return token in tokens
 
-    def _l_getLockForUri(self, uri):
-        tokens, uris = self._init_locks()
-        return uris.get(uri, None)
+    def _l_getLockForUrl(self, url):
+        tokens, urls = self._init_locks()
+        return urls.get(url, None)
 
     def _l_getLock(self, token):
-        tokens, uris = self._init_locks()
+        tokens, urls = self._init_locks()
         return tokens.get(token, None)
 
     def _l_delLock(self, token):
-        tokens, uris = self._init_locks()
+        tokens, urls = self._init_locks()
         if token in tokens:
-            del uris[tokens[token].uri]
+            del urls[tokens[token].url]
             del tokens[token]
 
     def _l_setLock(self, lock):
-        tokens, uris = self._init_locks()
+        tokens, urls = self._init_locks()
         tokens[lock.token] = lock
-        uris[lock.uri] = lock
+        urls[lock.url] = lock
 
     def _lock_unlock_parse(self, body):
         doc = minidom.parseString(body)
 
         data = {}
         info = doc.getElementsByTagNameNS('DAV:', 'lockinfo')[0]
-        data['lockscope'] = info.getElementsByTagNameNS('DAV:', 'lockscope')[0]\
-                                .firstChild.localName
-        data['locktype'] = info.getElementsByTagNameNS('DAV:', 'locktype')[0]\
-                                .firstChild.localName
+        data['lockscope'] = info.getElementsByTagNameNS(
+            'DAV:', 'lockscope')[0].firstChild.localName
+        data['locktype'] = info.getElementsByTagNameNS('DAV:', 'locktype')[0] \
+            .firstChild.localName
         data['lockowner'] = info.getElementsByTagNameNS('DAV:', 'owner')
         return data
 
-    def _lock_unlock_create(self, uri, creator, depth, data):
-        lock = LockItem(uri, creator, **data)
-        iscollection = uri[-1] == '/' # very dumb collection check
+    def _lock_unlock_create(self, url, creator, depth, data):
+        lock = LockItem(url, creator, **data)
+        iscollection = url[-1] == '/'  # very dumb collection check
 
         result = ''
         if depth == 'infinity' and iscollection:
             # locking of children/collections not yet supported
             pass
 
-        if not self._l_isLocked(uri):
+        if not self._l_isLocked(url):
             self._l_setLock(lock)
 
         # because we do not handle children we leave result empty
@@ -84,21 +85,23 @@ class LockManager:
         if self._config.DAV.getboolean('verbose') is True:
             log.info('UNLOCKing resource %s' % self.headers)
 
-        uri = urllib.parse.urljoin(self.get_baseuri(dc), self.path)
-        uri = urllib.parse.unquote(uri)
+        url = urllib.parse.urljoin(self.get_baseurl(dc), self.path)
+        url = urllib.parse.unquote(url)
 
         # check lock token - must contain a dash
-        if not self.headers.get('Lock-Token', '').find('-')>0:
+        if not self.headers.get('Lock-Token', '').find('-') > 0:
             return self.send_status(400)
 
         token = tokenFinder(self.headers.get('Lock-Token'))
-        if self._l_isLocked(uri):
+        if self._l_isLocked(url):
             self._l_delLock(token)
 
         self.send_body(None, 204, 'OK', 'OK')
 
     def do_LOCK(self):
-        """ Locking is implemented via in-memory caches. No data is written to disk.  """
+        """
+        Locking is implemented via in-memory caches. No data is written to disk.
+        """
 
         dc = self.IFACE_CLASS
 
@@ -106,17 +109,17 @@ class LockManager:
 
         body = None
         if 'Content-Length' in self.headers:
-            l = self.headers['Content-Length']
-            body = self.rfile.read(int(l))
+            content_length = self.headers['Content-Length']
+            body = self.rfile.read(int(content_length))
 
         depth = self.headers.get('Depth', 'infinity')
 
-        uri = urllib.parse.urljoin(self.get_baseuri(dc), self.path)
-        uri = urllib.parse.unquote(uri)
-        log.info('do_LOCK: uri = %s' % uri)
+        url = urllib.parse.urljoin(self.get_baseurl(dc), self.path)
+        url = urllib.parse.unquote(url)
+        log.info('do_LOCK: url = %s' % url)
 
         ifheader = self.headers.get('If')
-        alreadylocked = self._l_isLocked(uri)
+        alreadylocked = self._l_isLocked(url)
         log.info('do_LOCK: alreadylocked = %s' % alreadylocked)
 
         if body and alreadylocked:
@@ -127,18 +130,18 @@ class LockManager:
         elif body and not ifheader:
             # LOCK with XML information
             data = self._lock_unlock_parse(body)
-            token, result = self._lock_unlock_create(uri, 'unknown', depth, data)
+            token, result = self._lock_unlock_create(url, 'unknown', depth,
+                                                     data)
 
             if result:
                 self.send_body(bytes(result, 'utf-8'), 207, 'Error', 'Error',
-                                'text/xml; charset="utf-8"')
+                               'text/xml; charset="utf-8"')
 
             else:
                 lock = self._l_getLock(token)
                 self.send_body(bytes(lock.asXML(), 'utf-8'), 200, 'OK', 'OK',
-                                'text/xml; charset="utf-8"',
-                                {'Lock-Token' : '<opaquelocktoken:%s>' % token})
-
+                               'text/xml; charset="utf-8"',
+                               {'Lock-Token': '<opaquelocktoken:%s>' % token})
 
         else:
             # refresh request - refresh lock timeout
@@ -150,11 +153,12 @@ class LockManager:
                     if token and self._l_hasLock(token):
                         lock = self._l_getLock(token)
                         timeout = self.headers.get('Timeout', 'Infinite')
-                        lock.setTimeout(timeout) # automatically refreshes
+                        lock.setTimeout(timeout)  # automatically refreshes
                         found = 1
 
                         self.send_body(bytes(lock.asXML(), 'utf-8'),
-                                        200, 'OK', 'OK', 'text/xml; encoding="utf-8"')
+                                       200, 'OK', 'OK',
+                                       'text/xml; encoding="utf-8"')
                         break
                 if found:
                     break
@@ -162,16 +166,17 @@ class LockManager:
             # we didn't find any of the tokens mentioned - means
             # that table was cleared or another error
             if not found:
-                self.send_status(412) # precondition failed
+                self.send_status(412)  # precondition failed
+
 
 class LockItem:
     """ Lock with support for exclusive write locks. Some code taken from
     webdav.LockItem from the Zope project. """
 
-    def __init__(self, uri, creator, lockowner, depth=0, timeout='Infinite',
-                    locktype='write', lockscope='exclusive', token=None, **kw):
+    def __init__(self, url, creator, lockowner, depth=0, timeout='Infinite',
+                 locktype='write', lockscope='exclusive', token=None, **kw):
 
-        self.uri = uri
+        self.url = url
         self.creator = creator
         self.owner = lockowner
         self.depth = depth
@@ -209,28 +214,30 @@ class LockItem:
         owner_str = ''
         if isinstance(self.owner, str):
             owner_str = self.owner
-        elif isinstance(self.owner, xml.dom.minicompat.NodeList) and len(self.owner):
-            owner_str = "".join([node.toxml() for node in self.owner[0].childNodes])
+        elif isinstance(self.owner, xml.dom.minicompat.NodeList) and len(
+                self.owner):
+            owner_str = "".join(
+                [node.toxml() for node in self.owner[0].childNodes])
 
         token = self.token
         base = ('<%(ns)s:activelock>\n'
-             '  <%(ns)s:locktype><%(ns)s:%(locktype)s/></%(ns)s:locktype>\n'
-             '  <%(ns)s:lockscope><%(ns)s:%(lockscope)s/></%(ns)s:lockscope>\n'
-             '  <%(ns)s:depth>%(depth)s</%(ns)s:depth>\n'
-             '  <%(ns)s:owner>%(owner)s</%(ns)s:owner>\n'
-             '  <%(ns)s:timeout>%(timeout)s</%(ns)s:timeout>\n'
-             '  <%(ns)s:locktoken>\n'
-             '   <%(ns)s:href>opaquelocktoken:%(locktoken)s</%(ns)s:href>\n'
-             '  </%(ns)s:locktoken>\n'
-             ' </%(ns)s:activelock>\n'
-             ) % {
-               'ns': namespace,
-               'locktype': self.locktype,
-               'lockscope': self.lockscope,
-               'depth': self.depth,
-               'owner': owner_str,
-               'timeout': self.getTimeoutString(),
-               'locktoken': token,
+                '  <%(ns)s:locktype><%(ns)s:%(locktype)s/></%(ns)s:locktype>\n'
+                '  <%(ns)s:lockscope><%(ns)s:%(lockscope)s/></%(ns)s:lockscope>\n'
+                '  <%(ns)s:depth>%(depth)s</%(ns)s:depth>\n'
+                '  <%(ns)s:owner>%(owner)s</%(ns)s:owner>\n'
+                '  <%(ns)s:timeout>%(timeout)s</%(ns)s:timeout>\n'
+                '  <%(ns)s:locktoken>\n'
+                '   <%(ns)s:href>opaquelocktoken:%(locktoken)s</%(ns)s:href>\n'
+                '  </%(ns)s:locktoken>\n'
+                ' </%(ns)s:activelock>\n'
+                ) % {
+                   'ns': namespace,
+                   'locktype': self.locktype,
+                   'lockscope': self.lockscope,
+                   'depth': self.depth,
+                   'owner': owner_str,
+                   'timeout': self.getTimeoutString(),
+                   'locktoken': token,
                }
 
         if discover is True:

@@ -1,19 +1,24 @@
 from __future__ import absolute_import
-import os
-import textwrap
-import six
+
 import logging
-import types
+import os
 import shutil
+import textwrap
+import types
 from io import StringIO
+
+import six
 from six.moves import urllib
+
 from pywebdav.lib.constants import COLLECTION, OBJECT
-from pywebdav.lib.errors import *
+from pywebdav.lib.davcmd import copyone, copytree, moveone, movetree, delone, \
+    deltree
 from pywebdav.lib.iface import *
-from pywebdav.lib.davcmd import copyone, copytree, moveone, movetree, delone, deltree
+
 if six.PY2:
     from cgi import escape
 else:
+    # noinspection PyCompatibility
     from html import escape
 
 log = logging.getLogger(__name__)
@@ -23,11 +28,13 @@ BUFFER_SIZE = 128 * 1000
 MAGIC_AVAILABLE = False
 try:
     import mimetypes
+
     MAGIC_AVAILABLE = True
     log.info('Mimetype support ENABLED')
 except ImportError:
     log.info('Mimetype support DISABLED')
     pass
+
 
 class Resource(object):
     # XXX this class is ugly
@@ -47,7 +54,7 @@ class Resource(object):
             time.sleep(0.005)
         self.__fp.close()
 
-    def read(self, length = 0):
+    def read(self, length=0):
         if length == 0:
             length = self.__file_size
 
@@ -69,14 +76,17 @@ class FilesystemHandler(dav_interface):
 
     """
     index_files = ()
+    directory: six.string_types
+    baseurl: six.string_types
+    mimecheck = False
 
-    def __init__(self, directory, uri, verbose=False):
+    def __init__(self, directory, url, verbose=False):
         self.setDirectory(directory)
-        self.setBaseURI(uri)
+        self.setBaseURL(url)
 
         # should we be verbose?
         self.verbose = verbose
-        log.info('Initialized with %s %s' % (directory, uri))
+        log.info('Initialized with %s %s' % (directory, url))
 
     def setDirectory(self, path):
         """ Sets the directory """
@@ -86,45 +96,45 @@ class FilesystemHandler(dav_interface):
 
         self.directory = path
 
-    def setBaseURI(self, uri):
-        """ Sets the base uri """
+    def setBaseURL(self, url):
+        """ Sets the base url """
 
-        self.baseuri = uri
+        self.baseurl = url
 
-    def uri2local(self,uri):
-        """ map uri in baseuri and local part """
-        uparts=urllib.parse.urlparse(uri)
-        fileloc=uparts[2][1:]
-        filename=os.path.join(self.directory, fileloc)
-        filename=os.path.normpath(filename)
+    def url2local(self, url):
+        """ map url in baseurl and local part """
+        uparts = urllib.parse.urlparse(url)
+        fileloc = uparts[2][1:]
+        filename = os.path.join(self.directory, fileloc)
+        filename = os.path.normpath(filename)
         return filename
 
-    def local2uri(self,filename):
-        """ map local filename to self.baseuri """
+    def local2url(self, filename):
+        """ map local filename to self.baseurl """
 
-        pnum=len(self.directory.replace("\\","/").split("/"))
-        parts=filename.replace("\\","/").split("/")[pnum:]
-        sparts="/"+"/".join(parts)
-        uri=urllib.parse.urljoin(self.baseuri,sparts)
-        return uri
+        # TODO: this is sensitive to "./" and to trailing "/"
+        pnum = len(self.directory.replace("\\", "/").split("/"))
+        parts = filename.replace("\\", "/").split("/")[pnum:]
+        sparts = "/" + "/".join(parts)
+        url = urllib.parse.urljoin(self.baseurl, sparts)
+        return url
 
+    def get_childs(self, url, _filter=None):
+        """ return the child objects as self.baseurls for the given URI """
 
-    def get_childs(self, uri, filter=None):
-        """ return the child objects as self.baseuris for the given URI """
-
-        fileloc=self.uri2local(uri)
-        filelist=[]
+        fileloc = self.url2local(url)
+        filelist = []
 
         if os.path.exists(fileloc):
             if os.path.isdir(fileloc):
                 try:
-                    files=os.listdir(fileloc)
-                except:
+                    files = os.listdir(fileloc)
+                except FileNotFoundError:
                     raise DAV_NotFound
 
                 for file in files:
-                    newloc=os.path.join(fileloc,file)
-                    filelist.append(self.local2uri(newloc))
+                    newloc = os.path.join(fileloc, file)
+                    filelist.append(self.local2url(newloc))
 
                 log.info('get_childs: Childs %s' % filelist)
 
@@ -146,15 +156,18 @@ class FilesystemHandler(dav_interface):
                 </body>
             </html>
             """)
-        escapeditems = (escape(i) + ('/' if os.path.isdir(os.path.join(path, i)) else '') for i in os.listdir(path) if not i.startswith('.'))
-        htmlitems = "\n".join('<li><a href="{i}">{i}</a></li>'.format(i=i) for i in escapeditems)
+        escapeditems = (escape(i) + (
+            '/' if os.path.isdir(os.path.join(path, i)) else ''
+        ) for i in os.listdir(path) if not i.startswith('.'))
+        htmlitems = "\n".join(
+            '<li><a href="{i}">{i}</a></li>'.format(i=i) for i in escapeditems)
 
         return template.format(items=htmlitems, path=path)
 
-    def get_data(self,uri, range = None):
+    def get_data(self, url, data_range=None):
         """ return the content of an object """
 
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
             if os.path.isdir(path):
                 for filename in self.index_files:
@@ -168,41 +181,42 @@ class FilesystemHandler(dav_interface):
 
             if os.path.isfile(path):
                 file_size = os.path.getsize(path)
-                if range is None:
-                    fp=open(path,"rb")
-                    log.info('Serving content of %s' % uri)
+                if data_range is None:
+                    fp = open(path, "rb")
+                    log.info('Serving content of %s' % url)
                     return Resource(fp, file_size)
                 else:
-                    if range[1] == '':
-                        range[1] = file_size
+                    if data_range[1] == '':
+                        data_range[1] = file_size
                     else:
-                        range[1] = int(range[1])
+                        data_range[1] = int(data_range[1])
 
-                    if range[0] == '':
-                        range[0] = file_size - range[1]
+                    if data_range[0] == '':
+                        data_range[0] = file_size - data_range[1]
                     else:
-                        range[0] = int(range[0])
+                        data_range[0] = int(data_range[0])
 
-                    if range[0] > file_size:
+                    if data_range[0] > file_size:
                         raise DAV_Requested_Range_Not_Satisfiable
 
-                    if range[1] > file_size:
-                        range[1] = file_size
+                    if data_range[1] > file_size:
+                        data_range[1] = file_size
 
-                    fp=open(path,"rb")
-                    fp.seek(range[0])
-                    log.info('Serving range %s -> %s content of %s' % (range[0], range[1], uri))
-                    return Resource(fp, range[1] - range[0])
+                    fp = open(path, "rb")
+                    fp.seek(data_range[0])
+                    log.info('Serving range %s -> %s content of %s' %
+                             (data_range[0], data_range[1], url))
+                    return Resource(fp, data_range[1] - data_range[0])
             else:
                 # also raise an error for collections
-                # don't know what should happen then..
+                # don't know what should happen then...
                 log.info('get_data: %s not found' % path)
 
         raise DAV_NotFound
 
-    def _get_dav_resourcetype(self,uri):
+    def _get_dav_resourcetype(self, url):
         """ return type of object """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.isfile(path):
             return OBJECT
 
@@ -211,55 +225,54 @@ class FilesystemHandler(dav_interface):
 
         raise DAV_NotFound
 
-    def _get_dav_displayname(self,uri):
-        raise DAV_Secret    # do not show
+    def _get_dav_displayname(self, url):
+        raise DAV_Secret  # do not show
 
-    def _get_dav_getcontentlength(self,uri):
+    def _get_dav_getcontentlength(self, url):
         """ return the content length of an object """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
             if os.path.isfile(path):
-                s=os.stat(path)
+                s = os.stat(path)
                 return str(s[6])
 
         return '0'
 
-    def get_lastmodified(self,uri):
+    def get_lastmodified(self, url):
         """ return the last modified date of the object """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
-            s=os.stat(path)
-            date=s[8]
+            s = os.stat(path)
+            date = s[8]
             return date
 
         raise DAV_NotFound
 
-    def get_creationdate(self,uri):
+    def get_creationdate(self, url):
         """ return the last modified date of the object """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
-            s=os.stat(path)
-            date=s[9]
+            s = os.stat(path)
+            date = s[9]
             return date
 
         raise DAV_NotFound
 
-    def _get_dav_getcontenttype(self, uri):
+    def _get_dav_getcontenttype(self, url):
         """ find out yourself! """
 
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
             if os.path.isfile(path):
-                if MAGIC_AVAILABLE is False \
-                        or self.mimecheck is False:
+                if not MAGIC_AVAILABLE or not self.mimecheck:
                     return 'application/octet-stream'
                 else:
                     ret, encoding = mimetypes.guess_type(path)
 
                     # for non mimetype related result we
                     # simply return an appropriate type
-                    if ret.find('/')==-1:
-                        if ret.find('text')>=0:
+                    if ret.find('/') == -1:
+                        if ret.find('text') >= 0:
                             return 'text/plain'
                         else:
                             return 'application/octet-stream'
@@ -271,9 +284,9 @@ class FilesystemHandler(dav_interface):
 
         raise DAV_NotFound('Could not find %s' % path)
 
-    def put(self, uri, data, content_type=None):
+    def put(self, url, data, content_type=None):
         """ put the object into the filesystem """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         try:
             with open(path, "bw+") as fp:
                 if isinstance(data, types.GeneratorType):
@@ -282,26 +295,27 @@ class FilesystemHandler(dav_interface):
                 else:
                     if data:
                         fp.write(data)
-            log.info('put: Created %s' % uri)
+            log.info('put: Created %s' % url)
         except Exception as e:
-            log.info('put: Could not create %s, %r', uri, e)
+            log.info('put: Could not create %s, %r', url, e)
             raise DAV_Error(424)
 
         return None
 
-    def mkcol(self,uri):
+    def mkcol(self, url):
         """ create a new collection """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
 
         # remove trailing slash
-        if path[-1]=="/": path=path[:-1]
+        if path[-1] == "/":
+            path = path[:-1]
 
         # test if file already exists
         if os.path.exists(path):
             raise DAV_Error(405)
 
         # test if parent exists
-        h,t=os.path.split(path)
+        h, t = os.path.split(path)
         if not os.path.exists(h):
             raise DAV_Error(409)
 
@@ -310,29 +324,29 @@ class FilesystemHandler(dav_interface):
             os.mkdir(path)
             log.info('mkcol: Created new collection %s' % path)
             return 201
-        except:
+        except OSError:
             log.info('mkcol: Creation of %s denied' % path)
             raise DAV_Forbidden
 
-    ### ?? should we do the handler stuff for DELETE, too ?
-    ### (see below)
+    # ?? should we do the handler stuff for DELETE, too ?
+    # (see below)
 
-    def rmcol(self,uri):
+    def rmcol(self, url):
         """ delete a collection """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if not os.path.exists(path):
             raise DAV_NotFound
 
         try:
             shutil.rmtree(path)
         except OSError:
-            raise DAV_Forbidden # forbidden
+            raise DAV_Forbidden  # forbidden
 
         return 204
 
-    def rm(self,uri):
+    def rm(self, url):
         """ delete a normal resource """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if not os.path.exists(path):
             raise DAV_NotFound
 
@@ -340,82 +354,81 @@ class FilesystemHandler(dav_interface):
             os.unlink(path)
         except OSError as ex:
             log.info('rm: Forbidden (%s)' % ex)
-            raise DAV_Forbidden # forbidden
+            raise DAV_Forbidden  # forbidden
 
         return 204
 
-    ###
-    ### DELETE handlers (examples)
-    ### (we use the predefined methods in davcmd instead of doing
-    ### a rm directly
-    ###
+    #
+    # DELETE handlers (examples)
+    # (we use the predefined methods in davcmd instead of doing
+    # a rm directly
+    #
 
-    def delone(self,uri):
+    def delone(self, url):
         """ delete a single resource
 
         You have to return a result dict of the form
-        uri:error_code
+        url:error_code
         or None if everything's ok
 
         """
-        return delone(self,uri)
+        return delone(self, url)
 
-    def deltree(self,uri):
+    def deltree(self, url):
         """ delete a collection
 
         You have to return a result dict of the form
-        uri:error_code
+        url:error_code
         or None if everything's ok
         """
 
-        return deltree(self,uri)
+        return deltree(self, url)
 
+    #
+    # MOVE handlers (examples)
+    #
 
-    ###
-    ### MOVE handlers (examples)
-    ###
-
-    def moveone(self,src,dst,overwrite):
+    def moveone(self, src, dst, overwrite):
         """ move one resource with Depth=0
         """
 
-        return moveone(self,src,dst,overwrite)
+        return moveone(self, src, dst, overwrite)
 
-    def movetree(self,src,dst,overwrite):
+    def movetree(self, src, dst, overwrite):
         """ move a collection with Depth=infinity
         """
 
-        return movetree(self,src,dst,overwrite)
+        return movetree(self, src, dst, overwrite)
 
-    ###
-    ### COPY handlers
-    ###
+    #
+    # COPY handlers
+    #
 
-    def copyone(self,src,dst,overwrite):
+    def copyone(self, src, dst, overwrite):
         """ copy one resource with Depth=0
         """
 
-        return copyone(self,src,dst,overwrite)
+        return copyone(self, src, dst, overwrite)
 
-    def copytree(self,src,dst,overwrite):
+    def copytree(self, src, dst, overwrite):
         """ copy a collection with Depth=infinity
         """
 
-        return copytree(self,src,dst,overwrite)
+        return copytree(self, src, dst, overwrite)
 
-    ###
-    ### copy methods.
-    ### This methods actually copy something. low-level
-    ### They are called by the davcmd utility functions
-    ### copytree and copyone (not the above!)
-    ### Look in davcmd.py for further details.
-    ###
+    #
+    # copy methods.
+    # This methods actually copy something. low-level
+    # They are called by the davcmd utility functions
+    # copytree and copyone (not the above!)
+    # Look in davcmd.py for further details.
+    #
 
-    def copy(self,src,dst):
+    def copy(self, src, dst):
         """ copy a resource from src to dst """
 
-        srcfile=self.uri2local(src)
-        dstfile=self.uri2local(dst)
+        srcfile = self.url2local(src)
+        dstfile = self.url2local(dst)
         try:
             shutil.copy(srcfile, dstfile)
         except (OSError, IOError):
@@ -433,16 +446,16 @@ class FilesystemHandler(dav_interface):
 
         return self.mkcol(dst)
 
-    def exists(self,uri):
+    def exists(self, url):
         """ test if a resource exists """
-        path=self.uri2local(uri)
+        path = self.url2local(url)
         if os.path.exists(path):
             return 1
         return None
 
-    def is_collection(self,uri):
-        """ test if the given uri is a collection """
-        path=self.uri2local(uri)
+    def is_collection(self, url):
+        """ test if the given url is a collection """
+        path = self.url2local(url)
         if os.path.isdir(path):
             return 1
         else:

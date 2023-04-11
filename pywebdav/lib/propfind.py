@@ -1,5 +1,7 @@
 from __future__ import absolute_import
+
 import xml.dom.minidom
+
 domimpl = xml.dom.minidom.getDOMImplementation()
 
 import logging
@@ -22,23 +24,23 @@ class PROPFIND:
     nsmap       : map of namespaces
 
     The list of properties will contain tuples of the form
-    (element name, ns_prefix, ns_uri)
+    (element name, ns_prefix, ns_url)
 
 
     """
 
-    def __init__(self, uri, dataclass, depth, body):
+    def __init__(self, url, dataclass, depth, body):
         self.request_type = None
         self.nsmap = {}
         self.proplist = {}
         self.default_ns = None
         self._dataclass = dataclass
         self._depth = str(depth)
-        self._uri = uri.rstrip('/')
+        self._url = url.rstrip('/')
         self._has_body = None   # did we parse a body?
 
         if dataclass.verbose:
-            log.info('PROPFIND: Depth is %s, URI is %s' % (depth, uri))
+            log.info('PROPFIND: Depth is %s, URI is %s' % (depth, url))
 
         if body:
             self.request_type, self.proplist, self.namespaces = \
@@ -61,7 +63,7 @@ class PROPFIND:
         """
 
         # check if resource exists
-        if not self._dataclass.exists(self._uri):
+        if not self._dataclass.exists(self._url):
             raise DAV_NotFound
 
         df = None
@@ -92,29 +94,29 @@ class PROPFIND:
         ms.tagName = 'D:multistatus'
 
         if self._depth == "0":
-            pnames = dc.get_propnames(self._uri)
-            re = self.mk_propname_response(self._uri, pnames, doc)
+            pnames = dc.get_propnames(self._url)
+            re = self.mk_propname_response(self._url, pnames, doc)
             ms.appendChild(re)
 
         elif self._depth == "1":
-            pnames = dc.get_propnames(self._uri)
-            re = self.mk_propname_response(self._uri, pnames, doc)
+            pnames = dc.get_propnames(self._url)
+            re = self.mk_propname_response(self._url, pnames, doc)
             ms.appendChild(re)
 
-            for newuri in dc.get_childs(self._uri):
-                pnames = dc.get_propnames(newuri)
-                re = self.mk_propname_response(newuri, pnames, doc)
+            for newurl in dc.get_childs(self._url):
+                pnames = dc.get_propnames(newurl)
+                re = self.mk_propname_response(newurl, pnames, doc)
                 ms.appendChild(re)
         elif self._depth == 'infinity':
-            uri_list = [self._uri]
-            while uri_list:
-                uri = uri_list.pop()
-                pnames = dc.get_propnames(uri)
-                re = self.mk_propname_response(uri, pnames, doc)
+            url_list = [self._url]
+            while url_list:
+                url = url_list.pop()
+                pnames = dc.get_propnames(url)
+                re = self.mk_propname_response(url, pnames, doc)
                 ms.appendChild(re)
-                uri_childs = self._dataclass.get_childs(uri)
-                if uri_childs:
-                    uri_list.extend(uri_childs)
+                url_childs = self._dataclass.get_childs(url)
+                if url_childs:
+                    url_list.extend(url_childs)
 
         return doc.toxml(encoding="utf-8") + b"\n"
 
@@ -122,7 +124,7 @@ class PROPFIND:
         """ return a list of all properties """
         self.proplist = {}
         self.namespaces = []
-        for ns, plist in self._dataclass.get_propnames(self._uri).items():
+        for ns, plist in self._dataclass.get_propnames(self._url).items():
             self.proplist[ns] = plist
             self.namespaces.append(ns)
 
@@ -156,33 +158,33 @@ class PROPFIND:
         ms.tagName = 'D:multistatus'
 
         if self._depth == "0":
-            gp, bp = self.get_propvalues(self._uri)
-            res = self.mk_prop_response(self._uri, gp, bp, doc)
+            gp, bp = self.get_propvalues(self._url)
+            res = self.mk_prop_response(self._url, gp, bp, doc)
             ms.appendChild(res)
 
         elif self._depth == "1":
-            gp, bp = self.get_propvalues(self._uri)
-            res = self.mk_prop_response(self._uri, gp, bp, doc)
+            gp, bp = self.get_propvalues(self._url)
+            res = self.mk_prop_response(self._url, gp, bp, doc)
             ms.appendChild(res)
 
-            for newuri in self._dataclass.get_childs(self._uri):
-                gp, bp = self.get_propvalues(newuri)
-                res = self.mk_prop_response(newuri, gp, bp, doc)
+            for newurl in self._dataclass.get_childs(self._url):
+                gp, bp = self.get_propvalues(newurl)
+                res = self.mk_prop_response(newurl, gp, bp, doc)
                 ms.appendChild(res)
         elif self._depth == 'infinity':
-            uri_list = [self._uri]
-            while uri_list:
-                uri = uri_list.pop()
-                gp, bp = self.get_propvalues(uri)
-                res = self.mk_prop_response(uri, gp, bp, doc)
+            url_list = [self._url]
+            while url_list:
+                url = url_list.pop()
+                gp, bp = self.get_propvalues(url)
+                res = self.mk_prop_response(url, gp, bp, doc)
                 ms.appendChild(res)
-                uri_childs = self._dataclass.get_childs(uri)
-                if uri_childs:
-                    uri_list.extend(uri_childs)
+                url_childs = self._dataclass.get_childs(url)
+                if url_childs:
+                    url_list.extend(url_childs)
 
         return doc.toxml(encoding="utf-8") + b"\n"
 
-    def mk_propname_response(self, uri, propnames, doc):
+    def mk_propname_response(self, url, propnames, doc):
         """ make a new <prop> result element for a PROPNAME request
 
         This will simply format the propnames list.
@@ -192,17 +194,17 @@ class PROPFIND:
         re = doc.createElement("D:response")
 
         if self._dataclass.baseurl:
-            uri = self._dataclass.baseurl + '/' + '/'.join(uri.split('/')[3:])
+            url = self._dataclass.baseurl + '/' + '/'.join(url.split('/')[3:])
 
         # write href information
-        uparts = urllib.parse.urlparse(uri)
+        uparts = urllib.parse.urlparse(url)
         fileloc = uparts[2]
         href = doc.createElement("D:href")
 
-        huri = doc.createTextNode(uparts[0] + '://' +
+        hurl = doc.createTextNode(uparts[0] + '://' +
                                   '/'.join(uparts[1:2]) +
                                   urllib.parse.quote(fileloc))
-        href.appendChild(huri)
+        href.appendChild(hurl)
         re.appendChild(href)
 
         ps = doc.createElement("D:propstat")
@@ -225,7 +227,7 @@ class PROPFIND:
 
         return re
 
-    def mk_prop_response(self, uri, good_props, bad_props, doc):
+    def mk_prop_response(self, url, good_props, bad_props, doc):
         """ make a new <prop> result element
 
         We differ between the good props and the bad ones for
@@ -242,17 +244,17 @@ class PROPFIND:
             nsnum += 1
 
         if self._dataclass.baseurl:
-            uri = self._dataclass.baseurl + '/' + '/'.join(uri.split('/')[3:])
+            url = self._dataclass.baseurl + '/' + '/'.join(url.split('/')[3:])
 
         # write href information
-        uparts = urllib.parse.urlparse(uri)
+        uparts = urllib.parse.urlparse(url)
         fileloc = uparts[2]
         href = doc.createElement("D:href")
 
-        huri = doc.createTextNode(uparts[0] + '://' +
+        hurl = doc.createTextNode(uparts[0] + '://' +
                                   '/'.join(uparts[1:2]) +
                                   urllib.parse.quote(fileloc))
-        href.appendChild(huri)
+        href.appendChild(hurl)
         re.appendChild(href)
 
         # write good properties
@@ -321,7 +323,7 @@ class PROPFIND:
         # return the new response element
         return re
 
-    def get_propvalues(self, uri):
+    def get_propvalues(self, url):
         """ create lists of property values for an URI
 
         We create two lists for an URI: the properties for
@@ -339,7 +341,7 @@ class PROPFIND:
             for prop in plist:
                 ec = 0
                 try:
-                    r = ddc.get_prop(uri, ns, prop)
+                    r = ddc.get_prop(url, ns, prop)
                     good_props[ns][prop] = r
                 except DAV_Error as error_code:
                     ec = error_code.args[0]

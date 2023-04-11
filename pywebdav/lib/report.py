@@ -1,14 +1,18 @@
 from __future__ import absolute_import
-from .propfind import PROPFIND
+
 from xml.dom import minidom
+
+from .propfind import PROPFIND
+
 domimpl = minidom.getDOMImplementation()
 
-from .utils import get_parenturi
+from .utils import get_parenturl
+
 
 class REPORT(PROPFIND):
 
-    def __init__(self, uri, dataclass, depth, body):
-        PROPFIND.__init__(self, uri, dataclass, depth, body)
+    def __init__(self, url, dataclass, depth, body):
+        PROPFIND.__init__(self, url, dataclass, depth, body)
 
         doc = minidom.parseString(body)
 
@@ -17,43 +21,43 @@ class REPORT(PROPFIND):
     def create_propname(self):
         """ create a multistatus response for the prop names """
 
-        dc=self._dataclass
+        dc = self._dataclass
         # create the document generator
         doc = domimpl.createDocument(None, "multistatus", None)
         ms = doc.documentElement
         ms.setAttribute("xmlns:D", "DAV:")
         ms.tagName = 'D:multistatus'
 
-        if self._depth=="0":
-            if self._uri in self._dataclass.get_childs(get_parenturi(self._uri),
-                    self.filter):
-                pnames=dc.get_propnames(self._uri)
-                re=self.mk_propname_response(self._uri,pnames, doc)
+        if self._depth == "0":
+            if self._url in self._dataclass.get_childs(get_parenturl(self._url),
+                                                       self.filter):
+                pnames = dc.get_propnames(self._url)
+                re = self.mk_propname_response(self._url, pnames, doc)
                 ms.appendChild(re)
 
-        elif self._depth=="1":
-            if self._uri in self._dataclass.get_childs(get_parenturi(self._uri),
-                    self.filter):
-                pnames=dc.get_propnames(self._uri)
-                re=self.mk_propname_response(self._uri,pnames, doc)
+        elif self._depth == "1":
+            if self._url in self._dataclass.get_childs(get_parenturl(self._url),
+                                                       self.filter):
+                pnames = dc.get_propnames(self._url)
+                re = self.mk_propname_response(self._url, pnames, doc)
                 ms.appendChild(re)
 
-            for newuri in dc.get_childs(self._uri, self.filter):
-                pnames=dc.get_propnames(newuri)
-                re=self.mk_propname_response(newuri,pnames, doc)
+            for newurl in dc.get_childs(self._url, self.filter):
+                pnames = dc.get_propnames(newurl)
+                re = self.mk_propname_response(newurl, pnames, doc)
                 ms.appendChild(re)
-        elif self._depth=='infinity':
-            uri_list = [self._uri]
-            while uri_list:
-                uri = uri_list.pop()
-                if uri in self._dataclass.get_childs(get_parenturi(uri),
-                        self.filter):
-                    pnames=dc.get_propnames(uri)
-                    re=self.mk_propname_response(uri,pnames, doc)
+        elif self._depth == 'infinity':
+            url_list = [self._url]
+            while url_list:
+                url = url_list.pop()
+                if url in self._dataclass.get_childs(get_parenturl(url),
+                                                     self.filter):
+                    pnames = dc.get_propnames(url)
+                    re = self.mk_propname_response(url, pnames, doc)
                     ms.appendChild(re)
-                uri_childs = self._dataclass.get_childs(uri)
-                if uri_childs:
-                    uri_list.extend(uri_childs)
+                url_childs = self._dataclass.get_childs(url)
+                if url_childs:
+                    url_list.extend(url_childs)
 
         return doc.toxml(encoding="utf-8") + b"\n"
 
@@ -79,43 +83,41 @@ class REPORT(PROPFIND):
 
         """
 
-
         # create the document generator
         doc = domimpl.createDocument(None, "multistatus", None)
         ms = doc.documentElement
         ms.setAttribute("xmlns:D", "DAV:")
         ms.tagName = 'D:multistatus'
 
-        if self._depth=="0":
-            if self._uri in self._dataclass.get_childs(get_parenturi(self._uri),
-                    self.filter):
-                gp,bp=self.get_propvalues(self._uri)
-                res=self.mk_prop_response(self._uri,gp,bp,doc)
+        if self._depth == "0":
+            if self._url in self._dataclass.get_childs(get_parenturl(self._url),
+                                                       self.filter):
+                gp, bp = self.get_propvalues(self._url)
+                res = self.mk_prop_response(self._url, gp, bp, doc)
                 ms.appendChild(res)
 
-        elif self._depth=="1":
-            if self._uri in self._dataclass.get_childs(get_parenturi(self._uri),
-                    self.filter):
-                gp,bp=self.get_propvalues(self._uri)
-                res=self.mk_prop_response(self._uri,gp,bp,doc)
+        elif self._depth == "1":
+            if self._url in self._dataclass.get_childs(get_parenturl(self._url),
+                                                       self.filter):
+                gp, bp = self.get_propvalues(self._url)
+                res = self.mk_prop_response(self._url, gp, bp, doc)
                 ms.appendChild(res)
 
-            for newuri in self._dataclass.get_childs(self._uri, self.filter):
-                gp,bp=self.get_propvalues(newuri)
-                res=self.mk_prop_response(newuri,gp,bp,doc)
+            for newurl in self._dataclass.get_childs(self._url, self.filter):
+                gp, bp = self.get_propvalues(newurl)
+                res = self.mk_prop_response(newurl, gp, bp, doc)
                 ms.appendChild(res)
-        elif self._depth=='infinity':
-            uri_list = [self._uri]
-            while uri_list:
-                uri = uri_list.pop()
-                if uri in self._dataclass.get_childs(get_parenturi(uri),
-                        self.filter):
-                    gp,bp=self.get_propvalues(uri)
-                    res=self.mk_prop_response(uri,gp,bp,doc)
+        elif self._depth == 'infinity':
+            url_list = [self._url]
+            while url_list:
+                url = url_list.pop()
+                if url in self._dataclass.get_childs(get_parenturl(url),
+                                                     self.filter):
+                    gp, bp = self.get_propvalues(url)
+                    res = self.mk_prop_response(url, gp, bp, doc)
                     ms.appendChild(res)
-                uri_childs = self._dataclass.get_childs(uri)
-                if uri_childs:
-                    uri_list.extend(uri_childs)
+                url_childs = self._dataclass.get_childs(url)
+                if url_childs:
+                    url_list.extend(url_childs)
 
         return doc.toxml(encoding="utf-8") + b"\n"
-
